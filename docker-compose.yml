@@ -1,0 +1,25 @@
+version: "3.8"
+# Local dev: FastAPI + Postgres + Redis + Celery worker
+# Each service isolated in containers; FastAPI talks to Postgres over internal network.
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: inferencehub
+      POSTGRES_PASSWORD: inferencehub
+      POSTGRES_DB: inferencehub
+  redis:
+    image: redis:7-alpine
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+  worker:
+    build: .
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+    depends_on:
+      - db
+      - redis
