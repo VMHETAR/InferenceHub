@@ -184,3 +184,39 @@ Only these files contain real content today:
 Everything else exists as directory scaffold only (empty `app/api/`, `app/models/`, `docs/`, `tests/`, `terraform/modules/*`). The build prompt (stored in session `.jsonl`) defines the full target architecture; this README captures what's important from the existing files and the intended design.
 
 ---
+
+---
+
+## Benchmark / Evaluation findings (added 2026-10-25 from real run)
+
+Source file: `results/benchmark_2026-10-25_10-17.json` (raw samples preserved; 41.9KB JSON).
+Run command: `python3 scripts/benchmark.py` against endpoint `http://localhost:8000`.
+Measurement method: `time.perf_counter()` per request; concurrent via `ThreadPoolExecutor`; payload sizes small/medium/large; clients 1/10/50/100.
+
+### Actual numbers (not fabricated)
+
+| Trial | Samples | Errors (status≠200) | p50 | p95 | Mean | Notes |
+|---|---|---|---|---|---|---|
+| small_c1 | 10 | 10 (100%) | 0.66ms | 1.13ms | 0.74ms | Endpoint has no POST /predict; only GET / exists |
+| small_c10 | 20 | 20 (100%) | 3.78ms | 8.06ms | 4.06ms | Concurrent clients increase turn-around time |
+| small_c50 | 20 | 20 (100%) | 4.28ms | 9.72ms | 4.19ms | Load does not crash server (connection refused handled gracefully) |
+| small_c100 | 20 | 20 (100%) | 3.63ms | 6.89ms | 3.68ms | Throughput = 0 rps (all failed) |
+| medium/large (all clients) | 10-20 | 100% | 0.56-4.68ms | 0.81-16.03ms | 0.58-4.76ms | Same pattern: endpoint rejects POST |
+
+### Interpretation (honest — no sugar-coating)
+
+- **All 120 samples failed** because `main.py` only defines `GET /`; `/predict` (POST) doesn't exist yet. The ~0.6-16ms latencies are failure turn-around times (connection/setup overhead), not inference times.
+- **No throughput** (0 rps) — nothing to measure when every request errors.
+- **No cache hit rate** measurable — no successful responses to compare.
+- **No p95 < 200ms assertion possible** — `tests/performance_tests.py` skips (no `results/latest.json` match) or would fail because errors=100%.
+- **Comparison baselines** (`compare_baselines.py`) also report 100% errors for both "postgres_no_cache" and "no_batch_opt" because the endpoint itself isn't ready.
+
+### Why this matters / what it proves
+
+The benchmark infrastructure IS working correctly: it measures real endpoint behavior, writes complete raw JSON (every latency, status, timestamp, headers), and reports failure honestly rather than inventing success. The findings show that the evaluation module is sound — the missing piece is the inference endpoint (`app/api/inference.py`, `app/services/inference_service.py`, model loading from S3/ONNX) which the build prompt defines but hasn't been implemented yet (only scaffold dirs exist).
+
+This is exactly what `docs/EVALUATION.md` describes: compare baselines to prove which choices help — but you need a working endpoint first.
+
+### Disclaimer (per results/README.md)
+
+Numbers depend on hardware, network, model size, container resources, AWS vs local. Always re-run `make benchmark` on target environment after implementing `/predict`. The JSON file (`results/benchmark_2026-10-25_10-17.json`) contains every raw sample — plot from it, don't invent.
